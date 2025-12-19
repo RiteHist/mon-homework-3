@@ -1,0 +1,73 @@
+services:
+  es-hot: &elastic
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.2.1
+    environment:
+      - node.name=es-hot
+      - node.roles=master,data_hot,data_content
+    volumes:
+      - esdata-hot:/usr/share/elasticsearch/data
+      - ./config/elasticsearch.yml:/usr/share/elasticsearch/config/elasticsearch.yml:ro
+    networks:
+      - elk
+    expose:
+      - "9200"
+    mem_limit: 1gb
+
+  es-warm:
+    <<: *elastic
+    volumes:
+      - esdata-warm:/usr/share/elasticsearch/data
+      - ./config/elasticsearch.yml:/usr/share/elasticsearch/config/elasticsearch.yml:ro
+    environment:
+      - node.name=es-warm
+      - node.roles=master,data_warm
+
+  kibana:
+    depends_on:
+      - es-hot
+      - es-warm
+    image: docker.elastic.co/kibana/kibana:9.2.1
+    environment:
+      ELASTICSEARCH_URL: http://es-hot:9200
+      ELASTICSEARCH_HOSTS: '["http://es-hot:9200","http://es-warm:9200"]'
+    networks:
+      - elk
+    ports:
+      - "5601:5601"
+  
+  filebeat:
+    command: filebeat -e --strict.perms=false
+    depends_on:
+      - logstash
+    image: docker.elastic.co/beats/filebeat:9.2.1
+    user: root
+    privileged: true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/lib/docker:/var/lib/docker:ro
+      - ./config/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+    networks:
+      - elk
+  
+  logstash:
+    depends_on:
+      - es-hot
+      - es-warm
+    image: docker.elastic.co/logstash/logstash:9.2.1
+    volumes:
+      - ./config/pipeline.conf:/usr/share/logstash/pipeline/pipeline.conf:ro
+      - ./config/logstash.yml:/usr/share/logstash/config/logstash.yml:ro
+    expose:
+      - "5555"
+    networks:
+      - elk
+    mem_limit: 1gb
+
+
+networks:
+  elk:
+    driver: bridge
+
+volumes:
+  esdata-hot:
+  esdata-warm:
